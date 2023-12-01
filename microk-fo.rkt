@@ -59,21 +59,35 @@
     ((not-stringo t) (state->stream (distypify t string? st)))
     ((not-numbero t) (state->stream (distypify t number? st)))))
 
+(define (loop r)
+  (if (procedure? r)
+      (begin
+        (set! r (r))
+        (loop r))
+      r))
+
 (define (step s)
-  (match s
-    ((mplus s1 s2)
-     (let ((s1 (if (mature? s1) s1 (step s1))))
-       (cond ((not s1) s2)
-             ((pair? s1)
-              (cons (car s1)
-                    (mplus s2 (cdr s1))))
-             (else (mplus s2 s1)))))
-    ((bind s g)
-     (let ((s (if (mature? s) s (step s))))
-       (cond ((not s) #f)
-             ((pair? s)
-              (step (mplus (pause (car s) g)
-                           (bind (cdr s) g))))
-             (else (bind s g)))))
-    ((pause st g) (start st g))
-    (_            s)))
+  (loop (stepk s (lambda (x) x))))
+
+(define (stepk s k)
+  (lambda ()
+    (match s
+      [(mplus s1 s2)
+       (let [(k^ (lambda (s1)
+                   (cond [(not s1) (k s2)]
+                         [(pair? s1)
+                          (k (cons (car s1) (mplus s2 (cdr s1))))]
+                         [else (k (mplus s2 s1))])))]
+         (if (mature? s1) (k^ s1) (stepk s1 k^)))]
+      [(bind s g)
+       (let [(k^ (lambda (s)
+                   (cond [(not s) (k #f)]
+                         [(pair? s)
+                          (stepk (mplus (pause (car s) g)
+                                        (bind (cdr s) g))
+                                 k)]
+                         [else (k (bind s g))])))]
+         (if (mature? s) (k^ s) (stepk s k^)))]
+      [(pause st g) (k (start st g))]
+      [_            (k s)])))
+
